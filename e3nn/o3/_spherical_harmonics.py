@@ -77,7 +77,13 @@ class SphericalHarmonics(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # - PROFILER - with torch.autograd.profiler.record_function(self._prof_str):
         if self.normalize:
-            x = torch.nn.functional.normalize(x, dim=-1)  # forward 0's instead of nan for zero-radius
+            # x = torch.nn.functional.normalize(x, dim=-1)  # forward 0's instead of nan for zero-radius
+            def manual_normalize(x, p=2, dim=1, eps=1e-12):
+                # Compute p-norm using torch.sum
+                norm = torch.sum(x.abs()**p, dim=dim, keepdim=True)**(1./p)
+                norm = norm.clamp(min=eps)  # Avoid division by zero
+                return x / norm
+            x = manual_normalize(x, dim=-1)
 
         sh = _spherical_harmonics(self._lmax, x[..., 0], x[..., 1], x[..., 2])
 
@@ -88,12 +94,12 @@ class SphericalHarmonics(torch.nn.Module):
             ], dim=-1)
 
         if self.normalization == 'integral':
-            sh.mul_(torch.cat([
+            sh.mul(torch.cat([
                 (math.sqrt(2 * l + 1) / math.sqrt(4 * math.pi)) * torch.ones(2 * l + 1, dtype=sh.dtype, device=sh.device)
                 for l in self._ls_list
             ]))
         elif self.normalization == 'component':
-            sh.mul_(torch.cat([
+            sh.mul(torch.cat([
                 math.sqrt(2 * l + 1) * torch.ones(2 * l + 1, dtype=sh.dtype, device=sh.device)
                 for l in self._ls_list
             ]))
@@ -180,7 +186,7 @@ def spherical_harmonics(
     return sh(x)
 
 
-@torch.jit.script
+# @torch.jit.script
 def _spherical_harmonics(lmax: int, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
     sh_0_0 = torch.ones_like(x)
     if lmax == 0:
